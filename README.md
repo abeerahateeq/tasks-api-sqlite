@@ -1,21 +1,24 @@
-# Tasks API (SQLite)
+# Tasks API (Postgres + Docker)
 
-A CRUD tasks API built with Node.js, Express and better-sqlite3. It is the same API as Assignment 1, but tasks are now stored in a SQLite database instead of memory, so data survives server restarts.
+CRUD tasks API built with Node.js and Express, now running against a real PostgreSQL database in Docker. The whole stack (API and database) starts with one command.
 
-## Why SQLite?
-- The whole database is a single file, so there is no server to install or run.
-- It needs zero setup: the file is created automatically the first time the app starts.
-- Data persists across restarts, which is exactly what this assignment needs.
+Storage history: memory (A1), SQLite (A2), Postgres in a container (A3). The routes and the API stayed the same each time.
 
-## Where is the database?
-`tasks.db` in the project root. It is created automatically on first run, along with the `tasks` table and three example tasks (inserted only when the table is empty). It is git-ignored, so every clone starts with a fresh database.
-
-## How to start
+## Run it
 ```bash
-npm install
-npm start
+cp .env.example .env      # on Windows PowerShell: Copy-Item .env.example .env
+docker compose up --build
+Note: the database is published on host port 5433 (not 5432) because 5432 was already in use on my machine.
 ```
-The server runs on http://localhost:3000.
+The API is at http://localhost:3000. The database table and three example tasks are created automatically on the first run.
+
+## Environment variables
+See `.env.example`. `.env` is git-ignored, so the real password is never committed.
+
+| Variable | Purpose |
+|----------|---------|
+| POSTGRES_PASSWORD | Password for the Postgres container (also used by compose to build the API's connection string) |
+| DATABASE_URL | Connection string used when running the app directly with `npm run dev` |
 
 ## Endpoints
 | Method | Path | Success | Errors |
@@ -26,34 +29,27 @@ The server runs on http://localhost:3000.
 | PUT | /tasks/:id | 200 | 400 invalid body, 404 unknown id |
 | DELETE | /tasks/:id | 204 | 404 unknown id |
 
-Try it:
-```bash
-curl -i http://localhost:3000/tasks
-curl -i -X POST http://localhost:3000/tasks -H "Content-Type: application/json" -d '{"title":"Walk"}'
-curl -i -X PUT http://localhost:3000/tasks/1 -H "Content-Type: application/json" -d '{"done":true}'
-curl -i -X DELETE http://localhost:3000/tasks/1
+Example:
+```
+$ curl.exe -i http://localhost:3000/tasks
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+[{"id":1,"title":"Buy milk","done":false},{"id":2,"title":"Learn SQL","done":false},{"id":3,"title":"Push project to GitHub","done":true}]
 ```
 
-## Schema
-```sql
-CREATE TABLE IF NOT EXISTS tasks (
-  id    INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL,
-  done  INTEGER NOT NULL DEFAULT 0
-);
-```
+## Architecture: what changed in this assignment
+All database code lives in one file, db.js (the repository). server.js only handles routes and validation and contains no SQL. Swapping SQLite for Postgres meant writing db.js and adding the Dockerfile, compose.yaml and .env.example. I also had to edit server.js so each route awaits the async database calls (pg is asynchronous, better-sqlite3 was synchronous). The endpoints, status codes and response shapes did not change.
+
+## How persistence was checked
+1. Created a task with POST and marked it done with PUT.
+2. Ran docker compose down, then docker compose up -d (without -v, so the volume is kept).
+3. GET /tasks still returned the task, because the taskdata volume stores the database files outside the container.
+4. Opened psql inside the container (docker compose exec db psql -U postgres -d tasks) and ran SELECT * FROM tasks; to see the same rows.
 
 ## Database screenshot
-![tasks.db open in DB Browser for SQLite](screenshots/db-browser.png)
+![Tasks in Postgres](screenshots/postgres.png)
 
-## Example SQL query (Stage 4)
-```sql
-SELECT * FROM tasks WHERE done = 1;
-```
-Returned: <WRITE ONE SENTENCE ABOUT WHAT YOUR QUERY RETURNED>.
-
-## Why identical tests passing proves storage is an implementation detail
-The same curl commands from Assignment 1 give the same status codes and JSON shapes against the SQLite version. Because clients cannot tell the storage changed, the storage layer is just an implementation detail behind the API.
-
-## Parameterized queries and transactions
-All queries use `?` placeholders, so user input is never glued into SQL strings. The three seed inserts run inside a transaction so they all succeed or none do.
+## Security notes
+- All queries are parameterized (`$1`, `$2`), so user input is never glued into SQL.
+- The password comes from `.env`, which is git-ignored.
